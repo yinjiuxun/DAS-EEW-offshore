@@ -1,25 +1,11 @@
 #%% import modules
-import os
 import pandas as pd
-#from sep_util import read_file
-import numpy as np
-from dateutil import parser
-import obspy
-import statsmodels.api as sm
-
 import sys
 sys.path.append('../')
 from utility.general import mkdir
-from utility.processing import remove_outliers
-
-import seaborn as sns
-
 # Plotting
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 # %matplotlib inline
 params = {
@@ -39,38 +25,20 @@ params = {
 matplotlib.rcParams.update(params)
 
 import pygmt
-
-
 #%% 
-# Specify the file names
-combined_results_output_dir = '/kuafu/yinjx/Curie/peak_amplitude_scaling_results_strain_rate'
-figure_output_dir = combined_results_output_dir + '/data_figures'
+# make the output directory
+figure_output_dir = '../results'
 mkdir(figure_output_dir)
-
-event_folder = '/kuafu/EventData/Curie'
-
-region_label = ['curie']
-region_legend_text = ['Curie'] 
-
-snr_threshold = 10
-min_channel = 100
-magnitude_threshold = [2, 10]
-
 #%% 
-DAS_info = pd.read_csv(event_folder + '/das_info.csv')
-catalog = pd.read_csv(event_folder + '/catalog.csv')
-
-
-# events to show
-event_id_selected = [9001, 9007, 9006]
-
-
+# load DAS info
+DAS_info = pd.read_csv('../data_files/das_info/das_info.csv')
 DAS_channel_num = DAS_info.shape[0]
 DAS_lon = DAS_info.longitude
 DAS_lat = DAS_info.latitude
 
-# specified events
-specified_event_list = [9006, 9007, 9006] #73739346, 
+# Load catalog
+catalog = pd.read_csv('../data_files/catalogs/catalog.csv')
+event_id_selected = [9001, 9007, 9006]
 catalog_select_all = catalog[catalog.event_id.isin(event_id_selected)]
 
 num_events = catalog_select_all.shape[0]
@@ -79,14 +47,13 @@ event_lat = catalog_select_all.latitude
 event_id = catalog_select_all.event_id
 
 # load the regional permanent station
-stations = pd.read_csv('/kuafu/yinjx/Curie/curie_nearby_stations.csv', index_col=None)
-moment_tensor_catalog = pd.read_csv('/kuafu/yinjx/Curie/moment_tensor_catalog.csv', index_col=None, header=None)
+stations = pd.read_csv('../data_files/nearby_stations/curie_nearby_stations.csv', index_col=None)
+moment_tensor_catalog = pd.read_csv('../data_files/moment_tensor_catalog/moment_tensor_catalog.csv', index_col=None, header=None)
 
 plt.hist(moment_tensor_catalog[2])
 plt.xlabel('depth (km)')
 plt.ylabel('Counts')
 plt.title(f'mean: {moment_tensor_catalog[2].mean():.2f}km, median: {moment_tensor_catalog[2].median():.2f}km')
-
 
 #%%
 # =========================  Plot both arrays in Chile with PyGMT ==============================
@@ -106,7 +73,7 @@ pygmt.config(FORMAT_GEO_MAP="ddd.x", MAP_FRAME_TYPE="plain", FONT_ANNOT_PRIMARY=
 # --------------- plotting the original Data Elevation Model -----------
 fig.basemap(region=gmt_region, 
 projection=projection, 
-frame=['WSrt', "xa0.5", "ya0.5"] #'WSrt+t"Arcata DAS experiment"'
+frame=['WSne', "x0.5", "y0.5"]
 )
 pygmt.makecpt(cmap="geo", series=[-4000, 4000])
 fig.grdimage(
@@ -118,10 +85,6 @@ fig.grdimage(
 )
 
 fig.plot(x=stations.Longitude.astype('float'), y=stations.Latitude.astype('float'), style="i0.8c", color="darkred")
-# fig.plot(x=stations[stations.Station=='VA01'].Longitude.astype('float'), 
-#          y=stations[stations.Station=='VA01'].Latitude.astype('float'), 
-#          style="i0.8c", pen="1p,white", color="darkred")
-
 fig.plot(x=catalog_select_all.longitude.astype('float'), y=catalog_select_all.latitude.astype('float'), style="c0.3c", color="black")
 for ii in range(catalog_select_all.shape[0]):
     fig.text(text=catalog_select_all.iloc[ii, :].place, x=catalog_select_all.iloc[ii, :].longitude.astype('float'), 
@@ -133,7 +96,3 @@ fig.text(text="C1.VA01", x=-71.5, y=-33.05, font="12p,Helvetica-Bold,black")
 fig.show()
 fig.savefig(figure_output_dir + '/map_of_earthquakes_Curie_GMT_0.png')
 fig.savefig(figure_output_dir + '/map_of_earthquakes_Curie_GMT_0.pdf')
-
-
-# %%
-# try to download the C1.VA01 data from 2022-06-10 to 2022-06-14 (local time)

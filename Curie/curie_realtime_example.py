@@ -8,6 +8,7 @@ import statsmodels.api as sm
 
 import sys
 sys.path.append('../')
+from utility.general import *
 from utility.loading import load_event_data
 from scipy.interpolate import griddata
 
@@ -38,62 +39,35 @@ mpl.rcParams.update(params)
 #%% 
 # 1. Specify earthquake to look at
 # load event waveforms
-region_label = 'curie' #'ridgecrest' #'LA-Google' #'mammothN' #'ridgecrest'
-
-weighted = 'ols' # 'ols' or 'wls'
-if weighted == 'ols':
-    weight_text = '' 
-elif weighted == 'wls':
-    weight_text = '_weighted' 
-else:
-    raise
-
+region_label = 'curie' 
 time_step = 50 # time step to measure peaks
 
-event_folder = '/kuafu/EventData/Curie'#'/kuafu/EventData/Mammoth_south' #'/kuafu/EventData/Ridgecrest'
-tt_dir = event_folder +  '/theoretical_arrival_time0' ##
-test_event_id =  9001#9001 #
+tt_dir = '../data_files/pickings/theoretical_arrival_time0' ##
+test_event_id =  9006 #9001, 9006
 tt_shift_p, tt_shift_s = 0, 0
 given_range_P = None
 given_range_S = None
 
-catalog = pd.read_csv(event_folder + '/catalog.csv')
-das_waveform_path = event_folder + '/data_raw'
+catalog = pd.read_csv('../data_files/catalogs/catalog.csv')
+das_waveform_path = '../data_files/event_data'
 
 #%%
 # 2. Specify the array to look at
 # load the DAS array information
-DAS_info = pd.read_csv(event_folder + '/das_info.csv')
+DAS_info = pd.read_csv('../data_files/das_info/das_info.csv')
 # Only keep the first 7000 channels
 DAS_info = DAS_info[DAS_info['index'] < 7000]
 
-# DAS_info = pd.read_csv('/kuafu/EventData/Mammoth_south/das_info.csv')
-# specify the directory of ML picking
-ML_picking_dir = event_folder + '/picks_phasenet_das'
+ML_picking_dir = '../data_files/pickings/picks_phasenet_das'
 use_ML_picking = True
-if use_ML_picking:
-    picking_label='ml'
-else:
-    picking_label='vm'
 
 #%%
 # 3. Specify the coefficients to load
-# regression coefficients of the multiple array case
-results_output_dir = '/kuafu/yinjx/multi_array_combined_scaling/combined_strain_scaling_RM/'
-regression_dir = f'iter_regression_results_smf{weight_text}_100_channel_at_least'
+fig_output_dir = '../results/real_time_test'
+mkdir(fig_output_dir)
+fig_output_dir += f'/{test_event_id}'
+mkdir(fig_output_dir)
 
-# make figure output directory
-fig_output_dir = f'/kuafu/yinjx/Curie/peak_amplitude_scaling_results_strain_rate/transfer_regression_specified_smf{weight_text}_100_channel_at_least_9007/estimated_M_7000'
-if not os.path.exists(fig_output_dir):
-    os.mkdir(fig_output_dir)
-
-# make figure output directory
-fig_output_dir += f'/event_{test_event_id}_timestep_{time_step}dt'
-if not os.path.exists(fig_output_dir):
-    os.mkdir(fig_output_dir)
-
-
-#%%
 # Load DAS channels
 DAS_channel_num = DAS_info.shape[0]
 DAS_index = DAS_info['index']
@@ -108,15 +82,12 @@ nt = strain_rate.shape[0]
 das_time0 = np.arange(nt) * das_dt-30
 
 # Load regression results
-regP = sm.load(results_output_dir + '/' + regression_dir + f"/P_regression_combined_site_terms_iter.pickle")
-regS = sm.load(results_output_dir + '/' + regression_dir + f"/S_regression_combined_site_terms_iter.pickle")
-site_terms_df = pd.read_csv(results_output_dir + '/' + regression_dir + f"/site_terms_iter.csv")
-
-results_dir = f'/kuafu/yinjx/Curie/peak_amplitude_scaling_results_strain_rate/transfer_regression_specified_smf{weight_text}_100_channel_at_least_9007/'
-#results_dir = '/kuafu/yinjx/Arcata/peak_ampliutde_scaling_results_strain_rate/transfer_regression_test_smf_weighted_100_channel_at_least/3_fit_events_6th_test'
-site_terms_df = pd.read_csv(results_dir + '/site_terms_transfer.csv')
+regP = sm.load("../results/transfer_regression_with_9007/P_regression_combined_site_terms_transfer.pickle")
+regS = sm.load("../results/transfer_regression_with_9007/S_regression_combined_site_terms_transfer.pickle")
+site_terms_df = pd.read_csv("../results/transfer_regression_with_9007/site_terms_transfer.csv")
 site_terms_df = site_terms_df[site_terms_df.channel_id<=DAS_index.max()]
 DAS_channel_num = len(DAS_info)
+
 #%%
 # have the site term in the same shape of original data, fill nan instead
 channel_id = np.array(site_terms_df[site_terms_df.region == region_label]['channel_id'].astype('int'))
@@ -151,46 +122,23 @@ distance_to_source0 = locations2degrees(DAS_lat, DAS_lon, eq_lat, eq_lon) * 113 
 distance_to_source0 = np.sqrt(eq_info.iloc[0, :].depth_km**2 + distance_to_source0**2)
 distance_to_source0 = distance_to_source0[np.newaxis, :]
 
-# First try ML picking if specified, or turn to theoretical TT
-if use_ML_picking: #TODO: check why there is an obvious difference of picking
-    tt_tp = np.zeros(shape=(1, DAS_channel_num))*np.nan
-    tt_ts = tt_tp.copy()
-    try:
-        ML_picking = pd.read_csv(ML_picking_dir + f'/{test_event_id}.csv')
-        if 'mammoth' in region_label:
-            ML_picking = ML_picking[ML_picking.channel_index.isin(DAS_index)]
+# Use the picking from PhaseNet-DAS
+tt_tp = np.zeros(shape=(1, DAS_channel_num))*np.nan
+tt_ts = tt_tp.copy()
 
-        ML_picking_P = ML_picking[ML_picking.phase_type == 'P']
-        ML_picking_S = ML_picking[ML_picking.phase_type == 'S']
-        ML_picking_P = remove_ml_tt_outliers(ML_picking_P, das_dt, tdiff=5, given_range=given_range_P)
-        ML_picking_S = remove_ml_tt_outliers(ML_picking_S, das_dt, tdiff=20, given_range=given_range_S)
+ML_picking = pd.read_csv(ML_picking_dir + f'/{test_event_id}.csv')
 
-        ML_picking_P = ML_picking_P[ML_picking_P.channel_index<=DAS_index.max()]
-        ML_picking_S = ML_picking_S[ML_picking_S.channel_index<=DAS_index.max()]
+ML_picking_P = ML_picking[ML_picking.phase_type == 'P']
+ML_picking_S = ML_picking[ML_picking.phase_type == 'S']
+ML_picking_P = remove_ml_tt_outliers(ML_picking_P, das_dt, tdiff=5, given_range=given_range_P)
+ML_picking_S = remove_ml_tt_outliers(ML_picking_S, das_dt, tdiff=20, given_range=given_range_S)
 
-        tt_tp[0, ML_picking_P.channel_index] = das_time0[ML_picking_P.phase_index]
-        tt_ts[0, ML_picking_S.channel_index] = das_time0[ML_picking_S.phase_index]
+ML_picking_P = ML_picking_P[ML_picking_P.channel_index<=DAS_index.max()]
+ML_picking_S = ML_picking_S[ML_picking_S.channel_index<=DAS_index.max()]
 
-    except:
-        print("didn't find ML picking, use theoretical tt instead...")
-        use_ML_picking = False
-        picking_label = 'vm'
+tt_tp[0, ML_picking_P.channel_index] = das_time0[ML_picking_P.phase_index]
+tt_ts[0, ML_picking_S.channel_index] = das_time0[ML_picking_S.phase_index]
 
-    if 'arcata' in region_label:
-        tt_tp = tt_tp[:, np.array(DAS_index)-1]
-        tt_tp = tt_tp[:, np.array(DAS_index)-1]
-
-if not use_ML_picking:            
-
-    cvm_tt = pd.read_csv(tt_dir + f'/1D_tt_{test_event_id}.csv')
-    tt_tp = np.array(cvm_tt.P_arrival)
-    tt_tp = tt_tp[np.newaxis, :]
-    tt_ts = np.array(cvm_tt.S_arrival)
-    tt_ts = tt_ts[np.newaxis, :]
-
-    # For travel time from velocity model, may need some manual correction
-    tt_tp= tt_tp+tt_shift_p 
-    tt_ts= tt_ts+tt_shift_s
 
 # Some DUMP process to handle the arrival time
 tt_tp_temp = tt_tp.copy()
@@ -202,13 +150,13 @@ tt_ts_temp[np.isnan(tt_ts_temp)]=1e10
 #%% 
 # Estimate the response time for both DAS and permanent seimsic stations
 # Load nearby stations
-stations = pd.read_csv('/kuafu/yinjx/Curie/curie_nearby_stations.csv', index_col=None)
+stations = pd.read_csv('../data_files/nearby_stations/curie_nearby_stations.csv', index_col=None)
 STA_lon = stations.Longitude
 STA_lat = stations.Latitude
 # get distance from earthquake to all the regional stations
 distance_to_source_sta = locations2degrees(STA_lat, STA_lon, eq_lat, eq_lon) 
 
-travel_time_table_file = '/kuafu/yinjx/Curie/arrival_time_matching/travel_time_table.npz'
+travel_time_table_file = '../data_files/travel_time_table/travel_time_table.npz'
 temp = np.load(travel_time_table_file)
 distance_grid = temp['distance_grid']
 depth_grid = temp['depth_grid']
@@ -272,7 +220,6 @@ std_mag = np.nanstd(mag_estimate_final, axis=1)
 
 #%% 
 # Having all together as one figure
-
 time_rang_show = [0, 120]
 if np.isnan(np.nanmin(tt_tp)):
     time_rang_show[0] = np.nanmin(tt_ts)-10
@@ -290,15 +237,9 @@ clb = gca.imshow(strain_rate.T,
             extent=[das_time0[0], das_time0[-1], mag_estimate_P.shape[1], 0],
             aspect='auto', vmin=-clipVal, vmax=clipVal, cmap=plt.get_cmap('seismic'), interpolation='none')
 
-# if use_ML_picking:
-#     gca.plot(tt_tp[0, ML_picking_P.channel_index], ML_picking_P.channel_index, '-k', linewidth=4)
-#     gca.plot(tt_ts[0, ML_picking_S.channel_index], ML_picking_S.channel_index, '-k', linewidth=4)
-# else:
 gca.plot(tt_tp.flatten(), np.arange(tt_tp.shape[1]), '--k', linewidth=2, label='P')
 gca.plot(tt_ts.flatten(), np.arange(tt_ts.shape[1]), '-k', linewidth=2, label='S')
 
-# gca.vlines(x=[np.min(tt_tp)], ymax=strain_rate.shape[1], ymin=0, label='earliest tP', linestyle='--', color='b')
-# gca.vlines(x=[np.max(tt_tp)+2, np.max(tt_ts)+2], ymax=strain_rate.shape[1], ymin=0, linestyle='--', color='b', label='latest tP+2s and tS+2s')
 gca.vlines(x=[np.nanmin(tt_tp), np.nanmin(tt_ts)], ymax=strain_rate.shape[1], ymin=0, label='earliest tP and tS', color='b', linestyle='--')
 
 gca.set_xlabel('Time (s)')
@@ -323,7 +264,6 @@ clb = gca.imshow(mag_estimate_final.T,
 gca.plot(tt_tp.flatten(), np.arange(tt_tp.shape[1]), '--k', linewidth=2)
 gca.plot(tt_ts.flatten(), np.arange(tt_ts.shape[1]), '-k', linewidth=2)
 gca.vlines(x=[np.nanmin(tt_tp), np.nanmin(tt_ts)], ymax=mag_estimate_final.shape[1], ymin=0, label='earliest tP and tS', color='b', zorder=10)
-# gca.vlines(x=[np.nanmax(tt_tp)+2, np.nanmax(tt_ts)+2], ymax=mag_estimate_final.shape[1], ymin=0, linestyle='--', color='b', label='latest tP+2s and tS+2s', zorder=10)
 
 gca.set_xlabel('Time (s)')
 gca.set_ylabel('channel number')
@@ -337,17 +277,14 @@ axins2 = inset_axes(gca,
 fig.colorbar(clb, cax=axins2, orientation="vertical", label='Magnitude')
 
 gca=ax[2]
-# gca.plot(das_time, mag_estimate_final, '-k', linewidth=0.1, alpha=0.1)
 gca.plot(das_time, median_mag, '-r', linewidth=4, alpha=1, zorder=3, label='mean')
 gca.plot(das_time, median_mag-std_mag, '--r', linewidth=2, alpha=0.5, zorder=3, label='STD')
 gca.plot(das_time, median_mag+std_mag, '--r', linewidth=2, alpha=0.5, zorder=3)
 gca.vlines(x=[np.nanmin(tt_tp)], ymax=10, ymin=0, label='earliest tP', color='b', linestyle='--')
-# gca.vlines(x=[np.nanmax(tt_tp)+2, np.nanmax(tt_ts)+2], ymax=10, ymin=0, linestyle='--', color='b', label='latest tP+2s and tS+2s')
 
 # label the response time
 gca.vlines(x=[DAS_response_time], ymax=10, ymin=0, label='DAS response time (earliest tS)', color='#36756E', linewidth=4)
 gca.vlines(x=[SEIS_response_time], ymax=10, ymin=0, label='Seismic station response time', color='#724819', linewidth=4)
-
 
 mag_estiamte_P = median_mag[int(np.nanmax(tt_tp+2+30)/das_dt/time_step)]
 gca.text(x=np.nanmax(tt_tp+2), y=mag_estiamte_P+0.3, s=f'M {mag_estiamte_P:.2f}', color='r', fontsize=18)
@@ -371,9 +308,9 @@ for ii in range(0, 3):
     ax[ii].annotate(f'({letter_list[k]})', xy=(-0.05, 1.0), xycoords=ax[ii].transAxes, fontsize=20)
     k+=1
 
-plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_{picking_label}_locating.png', bbox_inches='tight')
-# plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_{picking_label}_locating.pdf', bbox_inches='tight')
-# fig.tight_layout()
+plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_true_location.png', bbox_inches='tight')
+
+
 
 
 #%%
@@ -401,17 +338,13 @@ def match_arrival(event_arrival_observed, event_arrival_template, misfit_type='l
     return ii_min, norm_diff
 
 def misfit_to_probability(misfit):
-    # sigma_misfit = np.nanstd(misfit)
-    # probability = np.exp(-misfit**2/2/sigma_misfit**2)/sigma_misfit/np.sqrt(2*np.pi)
-    # probability = probability/np.nansum(probability)
-
     probability = 1/misfit/np.nansum(1/misfit)
 
     return probability
 
 #%%
 # Load the calculated templates
-arrival_time_curve_template_file =  '/kuafu/yinjx/Curie/arrival_time_matching/arrival_time_template.npz'
+arrival_time_curve_template_file =  '../data_files/travel_time_table/arrival_time_template.npz'
 temp = np.load(arrival_time_curve_template_file)
 distance_to_source_all = temp['distance_grid']
 mean_distance = np.nanmean(distance_to_source_all, axis=0) # average distance from each grid point to an array
@@ -506,7 +439,7 @@ cmap = plt.cm.get_cmap('OrRd', 6)
 
 probability_mat_normalized = probability_mat/np.nansum(probability_mat, axis=1, keepdims=True)
 
-time_step_plot=5
+time_step_plot=1
 for i_time, time_pt in enumerate(das_time[::time_step_plot]):
     if time_pt < time_rang_show[0]:
         continue
@@ -589,7 +522,6 @@ for i_time, time_pt in enumerate(das_time[::time_step_plot]):
 
 
     gca=ax[3]
-    # gca.plot(das_time, mag_estimate_final, '-k', linewidth=0.1, alpha=0.1)
     if (time_pt <= np.nanmin(tt_ts)) and (time_pt >= np.nanmin(tt_tp)):
         gca.plot([np.nanmin(tt_tp), time_pt], [eq_mag.values*1.3, eq_mag.values*1.3], '--', color='gray', linewidth=5)
         gca.text(np.nanmin(tt_tp), eq_mag.values*1.4, 'Pilot estimation', fontsize=18)
@@ -628,19 +560,19 @@ for i_time, time_pt in enumerate(das_time[::time_step_plot]):
         ax[ii].annotate(f'({letter_list[k]})', xy=(-0.15, 1.0), xycoords=ax[ii].transAxes, fontsize=18)
         k+=1
 
-    plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_{picking_label}_{i_time:03n}.png')#, bbox_inches='tight')
+    plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_{i_time:03n}.png')#, bbox_inches='tight')
     plt.close('all')
 
     if time_pt>time_rang_show[1]:
         break
 # %%
+# Combine into a movie
 import imageio
 fileList = []
-time_step_plot=5
 for i_time, time_pt in enumerate(das_time[::time_step_plot]):
     if time_pt < time_rang_show[0]:
         continue
-    complete_path = fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_{picking_label}_{i_time:03n}.png'
+    complete_path = fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_{i_time:03n}.png'
     fileList.append(complete_path)
     if time_pt>time_rang_show[1]:
         break
@@ -750,6 +682,6 @@ for ii in range(0, 4):
     ax[ii].annotate(f'({letter_list[k]})', xy=(-0.15, 1.0), xycoords=ax[ii].transAxes, fontsize=18)
     k+=1
 
-plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_{picking_label}_final.png')#, bbox_inches='tight')
+plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_final.png')#, bbox_inches='tight')
 plt.close('all')
 # %%
