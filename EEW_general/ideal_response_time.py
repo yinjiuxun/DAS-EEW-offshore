@@ -48,10 +48,10 @@ matplotlib.rcParams.update(params)
 
 #%%
 # Define the path to store all the output results
-output_dir = '/kuafu/yinjx/EEW_general/ideal_response_time'
+output_dir = '../results/ideal_response_time'
 mkdir(output_dir)
 
-fig_output_dir = '/kuafu/yinjx/EEW_general/ideal_response_time/figures'
+fig_output_dir = output_dir + '/figures'
 mkdir(fig_output_dir)
 #%%|
 # make the evaluation domain (earthquake can be at every grid point)
@@ -62,7 +62,7 @@ eq_domain_y = np.linspace(-100, 100, ny, endpoint=True)
 
 # %%
 # make the synthetic das array
-das_label = 'Cshape' #['horizontal', 'vertical', 'cross', 'Cshape', 'multiple_arrays']
+das_label = 'multiple_arrays' #['horizontal', 'vertical', 'cross', 'Cshape', 'multiple_arrays']
 
 if das_label == 'horizontal':
     n_channel = 5000
@@ -105,9 +105,9 @@ elif das_label == 'Cshape':
 elif das_label == 'multiple_arrays':
     n_channel = 5000
     dx_das = 20*1e-3
-    n_das = 5
+    n_das = 4
     das_x0 = np.repeat([-np.arange(0, n_channel)*dx_das], n_das, axis=0)
-    das_y0 = np.repeat([np.ones(das_x0.shape[1])], n_das, axis=0) * np.linspace(-100, 100, n_das)[:, np.newaxis]
+    das_y0 = np.repeat([np.ones(das_x0.shape[1])], n_das, axis=0) * np.linspace(-75, 75, n_das)[:, np.newaxis]
     das_x = das_x0.flatten()
     das_y = das_y0.flatten()
     das_wave_type = 'P'
@@ -179,8 +179,6 @@ distance_grid, depth_grid = np.meshgrid(distance_fit, depth_fit)
 
 #%%
 # now begin to calculate time
-#%%
-# now begin to calculate time
 # for eq_depth in [20]:#[10, 20, 30, 40, 50]:
 eq_depth = 20
 if das_wave_type == 'P':
@@ -210,10 +208,10 @@ ax.vlines(x=st_domain_x.min()-2, ymax=eq_domain_y.max(), ymin=eq_domain_y.min(),
 ax.vlines(x=st_domain_x.min()-100, ymax=eq_domain_y.max(), ymin=eq_domain_y.min(), color='gold', linestyle='-.', linewidth=3)
 
 
-ax.text(eq_domain_x.mean()-50, eq_domain_y.max()+10, 'Offshore region')
-ax.text(st_domain_x.min()+20, eq_domain_y.max()+10, 'Land region')
-ax.text(das_x.mean()-10, das_y.mean()+10, 'DAS', fontdict={'color':'red'})
-ax.text(eq_domain_x.min()+15, eq_domain_y.max()-20, f'source depth:\n{eq_depth}km', bbox=dict(boxstyle="round", fc="white"))
+ax.text(eq_domain_x.mean()-50, eq_domain_y.max()+10, 'Offshore region', fontsize=16)
+ax.text(st_domain_x.min()+20, eq_domain_y.max()+10, 'Land region', fontsize=16)
+ax.text(das_x.mean()-10, das_y.mean()+10, 'DAS', fontdict={'color':'red'}, fontsize=20)
+ax.text(eq_domain_x.min()+15, eq_domain_y.max()-20, f'source depth:\n{eq_depth}km', bbox=dict(boxstyle="round", fc="white"), fontsize=15)
 
 divider = make_axes_locatable(ax)
 cax = divider.append_axes("right", size="5%", pad=0.05)
