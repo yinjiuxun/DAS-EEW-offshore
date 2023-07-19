@@ -21,7 +21,7 @@ def combine_results(peak_amplitude_df_temp, magnitude_X, wave_type):
     return individual_magnitude
 
 #%%
-#  ================== Curie transfered specified test ================== 
+#  ================== transfered specified test ================== 
 results_output_dir = '../results'
 peak_file_name = '../data_files/peak_amplitude/calibrated_peak_amplitude.csv'
 result_label = 'transfer'

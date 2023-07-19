@@ -11,6 +11,7 @@ sys.path.append('../')
 from utility.general import *
 from utility.loading import load_event_data
 from scipy.interpolate import griddata
+from scipy.signal import find_peaks
 
 from scipy.interpolate import griddata
 from obspy.geodetics import locations2degrees
@@ -36,6 +37,12 @@ params = {
 }
 mpl.rcParams.update(params)
 
+def convert_info_from_peak(DAS_lon, DAS_lat, eq_info, lon_grid, lat_grid, ii_max):
+    """A convenient function to extract information"""
+    opt_lat, opt_lon = lat_grid.flatten()[ii_max], lon_grid.flatten()[ii_max]
+    distance_to_source = locations2degrees(DAS_lat, DAS_lon, opt_lat, opt_lon) * 113 # in km
+    distance_to_source = np.sqrt(eq_info.iloc[0, :].depth_km**2 + distance_to_source**2)
+    return opt_lat,opt_lon,distance_to_source
 #%% 
 # 1. Specify earthquake to look at
 # load event waveforms
@@ -44,9 +51,19 @@ time_step = 50 # time step to measure peaks
 
 tt_dir = '../data_files/pickings/theoretical_arrival_time0' ##
 test_event_id =  9006 #9001, 9006
+show_loc = 3
+
+if test_event_id == 9006:
+    event_name = 'Valparaiso'
+elif test_event_id == 9001:
+    event_name = 'LaLigua'
+else:
+    raise NameError
+
 tt_shift_p, tt_shift_s = 0, 0
 given_range_P = None
 given_range_S = None
+every_n_channel = 50
 
 catalog = pd.read_csv('../data_files/catalogs/catalog.csv')
 das_waveform_path = '../data_files/event_data'
@@ -63,9 +80,9 @@ use_ML_picking = True
 
 #%%
 # 3. Specify the coefficients to load
-fig_output_dir = '../results/real_time_test'
+fig_output_dir = '../results/real_time_test_downsampled'
 mkdir(fig_output_dir)
-fig_output_dir += f'/{test_event_id}'
+fig_output_dir += f'/{test_event_id}_downsample_{every_n_channel}'
 mkdir(fig_output_dir)
 
 # Load DAS channels
@@ -75,10 +92,10 @@ DAS_lon = DAS_info.longitude
 DAS_lat = DAS_info.latitude
 
 # Load the DAS data
-strain_rate, info = load_event_data(das_waveform_path, test_event_id)
-strain_rate = strain_rate[:, DAS_index]
+strain_rate_temp, info = load_event_data(das_waveform_path, test_event_id)
+strain_rate_temp = strain_rate_temp[:, DAS_index]
 das_dt = info['dt_s']
-nt = strain_rate.shape[0]
+nt = strain_rate_temp.shape[0]
 das_time0 = np.arange(nt) * das_dt-30
 
 # Load regression results
@@ -99,6 +116,16 @@ site_terms_S[:, channel_id] = site_terms_df[site_terms_df.region == region_label
 
 site_terms_P = site_terms_P[:, np.array(DAS_index)-1]
 site_terms_S = site_terms_S[:, np.array(DAS_index)-1]
+
+
+#%% only keep every X channels to mimic the channel downsampling
+ii_channel = range(0, DAS_index.shape[0], every_n_channel)
+strain_rate= strain_rate_temp[:, ii_channel]
+site_terms_P = site_terms_P[:, ii_channel]
+site_terms_S = site_terms_S[:, ii_channel]
+DAS_lon = DAS_lon[ii_channel]
+DAS_lat = DAS_lat[ii_channel]
+
 #%%
 # load the travel time and process
 def remove_ml_tt_outliers(ML_picking, das_dt, tdiff=10, given_range=None):
@@ -139,6 +166,9 @@ ML_picking_S = ML_picking_S[ML_picking_S.channel_index<=DAS_index.max()]
 tt_tp[0, ML_picking_P.channel_index] = das_time0[ML_picking_P.phase_index]
 tt_ts[0, ML_picking_S.channel_index] = das_time0[ML_picking_S.phase_index]
 
+DAS_channel_num = len(ii_channel)
+tt_tp = tt_tp[:, ii_channel]
+tt_ts = tt_ts[:, ii_channel]
 
 # Some DUMP process to handle the arrival time
 tt_tp_temp = tt_tp.copy()
@@ -308,7 +338,7 @@ for ii in range(0, 3):
     ax[ii].annotate(f'({letter_list[k]})', xy=(-0.05, 1.0), xycoords=ax[ii].transAxes, fontsize=20)
     k+=1
 
-plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_true_location.png', bbox_inches='tight')
+plt.savefig(fig_output_dir + f'/{region_label}_{event_name}_estimated_mag_image_true_location.png', bbox_inches='tight')
 
 
 
@@ -348,8 +378,10 @@ arrival_time_curve_template_file =  '../data_files/travel_time_table/arrival_tim
 temp = np.load(arrival_time_curve_template_file)
 distance_to_source_all = temp['distance_grid']
 mean_distance = np.nanmean(distance_to_source_all, axis=0) # average distance from each grid point to an array
-event_arrival_P_template = temp['event_arrival_P'][:(DAS_index.max()+1), :]
-event_arrival_S_template = temp['event_arrival_S'][:(DAS_index.max()+1), :]
+# event_arrival_P_template = temp['event_arrival_P'][:(DAS_index.max()+1), :]
+# event_arrival_S_template = temp['event_arrival_S'][:(DAS_index.max()+1), :]
+event_arrival_P_template = temp['event_arrival_P'][:(DAS_index.max()+1), :][ii_channel, :]
+event_arrival_S_template = temp['event_arrival_S'][:(DAS_index.max()+1), :][ii_channel, :]
 event_SP_diff_template = event_arrival_S_template - event_arrival_P_template
 lon_grid = temp['lon_grid']
 lat_grid = temp['lat_grid']
@@ -357,11 +389,19 @@ lat_grid = temp['lat_grid']
 assumed_distance = 0.5
 # matrices to store the distance 
 location_mat = np.zeros((len(das_time), 2))*np.nan
+location_mat1, location_mat2 = location_mat.copy(), location_mat.copy()
+
 distance_mat = np.zeros((len(das_time), strain_rate.shape[1]))*np.nan
+distance_mat1 = np.zeros((len(das_time), strain_rate.shape[1]))*np.nan
+distance_mat2 = np.zeros((len(das_time), strain_rate.shape[1]))*np.nan
+
 probability_mat = np.zeros((len(das_time), event_arrival_S_template.shape[1]))*np.nan
 
 ttp = tt_tp_temp.squeeze()
 tts = tt_ts_temp.squeeze()
+
+distance_error_time = np.zeros((len(das_time), 2))*np.nan
+
 for i_time in range(len(das_time)):
     print(f'{das_time[i_time]:.2f} s')
     P_obs_arrival = np.zeros(ttp.shape)*np.nan
@@ -382,6 +422,8 @@ for i_time in range(len(das_time)):
             ii_x = np.nanargmax(probability[xx])
             ii_max = xx[ii_x]
 
+            ii_max1, ii_max2 = ii_max, ii_max
+
         else:# len(tts[iis]) > 0 when S comes
             S_obs_arrival[iis] = tts[iis] 
             SP_diff_obs_arrival = S_obs_arrival - P_obs_arrival
@@ -391,35 +433,75 @@ for i_time in range(len(das_time)):
                 probability = probability * misfit_to_probability(norm_diff_SP)
                 ii_max = np.nanargmax(probability)
 
-    opt_lat, opt_lon = lat_grid.flatten()[ii_max], lon_grid.flatten()[ii_max]
-    location_mat[i_time, 0] = opt_lat
-    location_mat[i_time, 1] = opt_lon
+                peaks, _ = find_peaks(probability, distance=500, height=np.nanmax(probability)*0.6)
+                ii_max1 = peaks[0]
+                ii_max2 = peaks[1]
+
     probability_mat[i_time, :] = probability
 
-    distance_to_source = locations2degrees(DAS_lat, DAS_lon, opt_lat, opt_lon) * 113 # in km
-    distance_to_source = np.sqrt(eq_info.iloc[0, :].depth_km**2 + distance_to_source**2)
-    
+    opt_lat, opt_lon, distance_to_source = convert_info_from_peak(DAS_lon, DAS_lat, eq_info, lon_grid, lat_grid, ii_max)
+
+    # put into matrices
+    location_mat[i_time, 0] = opt_lat
+    location_mat[i_time, 1] = opt_lon
     distance_mat[i_time, :] = distance_to_source
 
+    # opt_lat1, opt_lon1 = lat_grid.flatten()[ii_max1], lon_grid.flatten()[ii_max1]
+    # opt_lat2, opt_lon2 = lat_grid.flatten()[ii_max2], lon_grid.flatten()[ii_max2]
+
+    opt_lat1, opt_lon1, distance_to_source1 = convert_info_from_peak(DAS_lon, DAS_lat, eq_info, lon_grid, lat_grid, ii_max1)
+    opt_lat2, opt_lon2, distance_to_source2 = convert_info_from_peak(DAS_lon, DAS_lat, eq_info, lon_grid, lat_grid, ii_max2)
+    
+    location_mat1[i_time, 0], location_mat1[i_time, 1], distance_mat1[i_time, :] = opt_lat1, opt_lon1, distance_to_source1
+    location_mat2[i_time, 0], location_mat2[i_time, 1], distance_mat2[i_time, :] = opt_lat2, opt_lon2, distance_to_source2
+    
+    distance_error_time[i_time, 0] = locations2degrees(eq_lat, eq_lon, opt_lat1, opt_lon1) * 113
+    distance_error_time[i_time, 1] = locations2degrees(eq_lat, eq_lon, opt_lat2, opt_lon2) * 113
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(das_time, distance_error_time[:, 0], label='Location 1')
+ax.plot(das_time, distance_error_time[:, 1], label='Location 2')
+ax.legend()
+ax.set_title(event_name + f' M{eq_mag.values[0]:.2f}')
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Distance to epicenter (km)')
+plt.savefig(fig_output_dir + f'/{region_label}_{event_name}_location_error_time.png', bbox_inches='tight')
 
 #%%
 # calculate magnitude for each channel
 # replace distance_to_source with distance_mat
-mag_estimate_P = (np.log10(data_peak_mat_P+1e-12) - site_terms_P - np.log10(distance_mat)*regP.params['np.log10(distance_in_km)'])/regP.params['magnitude']
-median_mag_P = np.nanmedian(mag_estimate_P, axis=1)
-mean_mag_P = np.nanmean(mag_estimate_P, axis=1)
-std_mag_P = np.nanstd(mag_estimate_P, axis=1)
+def calculate_magnitude(regP, regS, site_terms_P, site_terms_S, data_peak_mat_P, data_peak_mat_S, distance_mat):
+    mag_estimate_P = (np.log10(data_peak_mat_P+1e-12) - site_terms_P - np.log10(distance_mat)*regP.params['np.log10(distance_in_km)'])/regP.params['magnitude']
+    median_mag_P = np.nanmedian(mag_estimate_P, axis=1)
+    mean_mag_P = np.nanmean(mag_estimate_P, axis=1)
+    std_mag_P = np.nanstd(mag_estimate_P, axis=1)
 
-mag_estimate_S = (np.log10(data_peak_mat_S+1e-12) - site_terms_S - np.log10(distance_mat)*regS.params['np.log10(distance_in_km)'])/regS.params['magnitude']
-median_mag_S = np.nanmedian(mag_estimate_S, axis=1)
-mean_mag_S = np.nanmean(mag_estimate_S, axis=1)
-std_mag_S = np.nanstd(mag_estimate_S, axis=1)
+    mag_estimate_S = (np.log10(data_peak_mat_S+1e-12) - site_terms_S - np.log10(distance_mat)*regS.params['np.log10(distance_in_km)'])/regS.params['magnitude']
+    median_mag_S = np.nanmedian(mag_estimate_S, axis=1)
+    mean_mag_S = np.nanmean(mag_estimate_S, axis=1)
+    std_mag_S = np.nanstd(mag_estimate_S, axis=1)
+
+    mag_estimate_final = mag_estimate_P.copy()
+    # mag_estimate_final[das_time_mat>=cvm_tt_ts] = mag_estimate_S[das_time_mat>=cvm_tt_ts]
+    mag_estimate_final = np.nanmedian(np.array([mag_estimate_P, mag_estimate_S]), axis=0)
+
+    return mag_estimate_P,mag_estimate_S, mag_estimate_final
+
+mag_estimate_P, mag_estimate_S, mag_estimate_final = calculate_magnitude(regP, regS, site_terms_P, site_terms_S, data_peak_mat_P, data_peak_mat_S, distance_mat)
+mag_estimate_P1, mag_estimate_S1, mag_estimate_final1 = calculate_magnitude(regP, regS, site_terms_P, site_terms_S, data_peak_mat_P, data_peak_mat_S, distance_mat1)
+mag_estimate_P2, mag_estimate_S2, mag_estimate_final2 = calculate_magnitude(regP, regS, site_terms_P, site_terms_S, data_peak_mat_P, data_peak_mat_S, distance_mat2)
+
+if show_loc == 1:
+    mag_estimate_final = mag_estimate_final1
+elif show_loc == 2:
+    mag_estimate_final = mag_estimate_final2
+elif show_loc == 3:
+    mag_estimate_final = (mag_estimate_final1 + mag_estimate_final2)/2
+else:
+    mag_estimate_final = mag_estimate_final*np.nan
 
 # combine both P and S to give final magnitude 
 das_time_mat = das_time[:, np.newaxis]
-mag_estimate_final = mag_estimate_P.copy()
-# mag_estimate_final[das_time_mat>=cvm_tt_ts] = mag_estimate_S[das_time_mat>=cvm_tt_ts]
-mag_estimate_final = np.nanmedian(np.array([mag_estimate_P, mag_estimate_S]), axis=0)
 
 median_mag = np.nanmedian(mag_estimate_final, axis=1)
 mean_mag = np.nanmean(mag_estimate_final, axis=1)
@@ -509,8 +591,16 @@ for i_time, time_pt in enumerate(das_time[::time_step_plot]):
     gca = ax[1]
     cbar = gca.imshow(np.reshape(probability_mat_normalized[i_time*time_step_plot, :], lat_grid.shape), aspect='auto', extent=[lon_grid.min(), lon_grid.max(), lat_grid.max(), lat_grid.min()])
     gca.plot(DAS_lon, DAS_lat, '-r')
-    gca.plot(eq_lon, eq_lat, 'r*', markersize=18)
-    gca.plot(location_mat[i_time*time_step_plot, 1], location_mat[i_time*time_step_plot, 0], 'kx', linewidth=2, markersize=18)
+    gca.plot(eq_lon, eq_lat, 'r*', markersize=18, zorder=10)
+    
+    if show_loc == 1:
+        gca.plot(location_mat1[i_time*time_step_plot, 1], location_mat1[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
+    if show_loc == 2:
+        gca.plot(location_mat2[i_time*time_step_plot, 1], location_mat2[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
+    if show_loc == 3:
+        gca.plot(location_mat1[i_time*time_step_plot, 1], location_mat1[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
+        gca.plot(location_mat2[i_time*time_step_plot, 1], location_mat2[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
+
     fig.colorbar(cbar, ax=gca, label='pdf')
 
     gca.set_xlabel('Lon')
@@ -576,7 +666,7 @@ for i_time, time_pt in enumerate(das_time[::time_step_plot]):
     fileList.append(complete_path)
     if time_pt>time_rang_show[1]:
         break
-writer = imageio.get_writer(fig_output_dir + f'/{region_label}_{test_event_id}_movie.mp4', fps=1)
+writer = imageio.get_writer(fig_output_dir + f'/{region_label}_{event_name}_movie.mp4', fps=1)
 
 for im in fileList:
     writer.append_data(imageio.imread(im))
@@ -632,8 +722,14 @@ fig.colorbar(clb, cax=axins2, orientation="vertical", label='Magnitude')
 gca = ax[1]
 cbar = gca.imshow(np.reshape(probability_mat_normalized[i_time*time_step_plot, :], lat_grid.shape), aspect='auto', extent=[lon_grid.min(), lon_grid.max(), lat_grid.max(), lat_grid.min()])
 gca.plot(DAS_lon, DAS_lat, '-r')
-gca.plot(eq_lon, eq_lat, 'r*', markersize=18)
-gca.plot(location_mat[i_time*time_step_plot, 1], location_mat[i_time*time_step_plot, 0], 'kx', linewidth=2, markersize=18)
+gca.plot(eq_lon, eq_lat, 'r*', markersize=18, zorder=10)
+if show_loc == 1:
+    gca.plot(location_mat1[i_time*time_step_plot, 1], location_mat1[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
+if show_loc == 2:
+    gca.plot(location_mat2[i_time*time_step_plot, 1], location_mat2[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
+if show_loc == 3:
+    gca.plot(location_mat1[i_time*time_step_plot, 1], location_mat1[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
+    gca.plot(location_mat2[i_time*time_step_plot, 1], location_mat2[i_time*time_step_plot, 0], 'x', color='gold', markeredgewidth=3, markersize=18)
 fig.colorbar(cbar, ax=gca, label='pdf')
 
 gca.set_xlabel('Lon')
@@ -682,6 +778,6 @@ for ii in range(0, 4):
     ax[ii].annotate(f'({letter_list[k]})', xy=(-0.15, 1.0), xycoords=ax[ii].transAxes, fontsize=18)
     k+=1
 
-plt.savefig(fig_output_dir + f'/{region_label}_{test_event_id}_estimated_mag_image_final.png')#, bbox_inches='tight')
+plt.savefig(fig_output_dir + f'/{region_label}_{event_name}_estimated_mag_image_final.png')#, bbox_inches='tight')
 plt.close('all')
 # %%

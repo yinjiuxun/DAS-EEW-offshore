@@ -62,7 +62,7 @@ eq_domain_y = np.linspace(-100, 100, ny, endpoint=True)
 
 # %%
 # make the synthetic das array
-das_label = 'multiple_arrays' #['horizontal', 'vertical', 'cross', 'Cshape', 'multiple_arrays']
+das_label = 'horizontal' #['horizontal', 'vertical', 'cross', 'Cshape', 'multiple_arrays']
 
 if das_label == 'horizontal':
     n_channel = 5000
@@ -216,7 +216,7 @@ ax.text(eq_domain_x.min()+15, eq_domain_y.max()-20, f'source depth:\n{eq_depth}k
 divider = make_axes_locatable(ax)
 cax = divider.append_axes("right", size="5%", pad=0.05)
 
-ax.set_xlabel('Distance along trench (km)')
+ax.set_xlabel('Distance normal to the trench (km)')
 ax.set_ylabel('Distance along coastline (km)')
 
 plt.colorbar(clb, cax=cax, label='response time difference')

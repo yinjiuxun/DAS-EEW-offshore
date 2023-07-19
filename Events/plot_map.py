@@ -94,5 +94,5 @@ fig.text(text="DAS array", x=-71.55, y=-32.9, font="12p,Helvetica-Bold,red")
 fig.text(text="C1.VA01", x=-71.5, y=-33.05, font="12p,Helvetica-Bold,black")
 
 fig.show()
-fig.savefig(figure_output_dir + '/map_of_earthquakes_Curie_GMT_0.png')
-fig.savefig(figure_output_dir + '/map_of_earthquakes_Curie_GMT_0.pdf')
+fig.savefig(figure_output_dir + '/map_of_earthquakes_GMT_0.png')
+fig.savefig(figure_output_dir + '/map_of_earthquakes_GMT_0.pdf')

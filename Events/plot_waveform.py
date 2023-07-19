@@ -63,20 +63,20 @@ def append_list(test_event_id, given_range_P, given_range_S, ymin, ymax):
 
 given_range_P=None
 
-# Curie events
+# events
 test_event_id_list = list(catalog.event_id)
 for ii in range(len(test_event_id_list)):
     given_range_P_list.append(None)
     given_range_S_list.append(None)
     if ii == 1:
-        ymin_list.append(5)
+        ymin_list.append(0)
         ymax_list.append(30)
     elif ii == 6:
         ymin_list.append(0)
-        ymax_list.append(25)
+        ymax_list.append(30)
     elif ii == 7:
         ymin_list.append(15)
-        ymax_list.append(60)
+        ymax_list.append(45)
     else:
         ymin_list.append(0)
         ymax_list.append(60)
@@ -152,8 +152,11 @@ for i_event in [1, 6, 7]:#range(len(test_event_id_list)):
         print('Cannot find the theoretical travel time, skip...')
 
     gca.legend(loc=3, fontsize=10)
+    gca.set_ylim(ymin, ymax)
     gca.invert_yaxis()
 
 
     plt.savefig(output_figure_dir + f'/{test_event_id}_ML_paper.png', bbox_inches='tight')
     # plt.savefig(output_figure_dir + f'/{test_event_id}_ML_paper.pdf', bbox_inches='tight')
+
+# %%
